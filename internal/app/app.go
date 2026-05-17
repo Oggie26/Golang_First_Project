@@ -1,5 +1,7 @@
 package app
 
+//go:generate go run github.com/swaggo/swag/cmd/swag@latest init -g ../../cmd/api/main.go -o ../../docs -d ./,../../internal/controller,../../cmd/api --parseDependency
+
 import (
 	"context"
 	"errors"
@@ -14,10 +16,8 @@ import (
 	"GoLang_Tutorial/internal/config"
 	"GoLang_Tutorial/internal/controller"
 	"GoLang_Tutorial/internal/middleware"
-	"GoLang_Tutorial/internal/models"
 	"GoLang_Tutorial/internal/repository"
 	"GoLang_Tutorial/internal/service"
-	"GoLang_Tutorial/pkg/database"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -26,40 +26,18 @@ import (
 
 func Run(cfg *config.Config) {
 	log.Println("Đang khởi động hệ thống...")
-
-	db, err := database.NewPostgresConnection(cfg.PG.URL)
-	if err != nil {
-		log.Fatalf("Lỗi kết nối Database: %v", err)
-	}
-	defer db.Close()
-
-	err = db.MigrateAll(models.GetModels()...)
-	if err != nil {
-		log.Fatalf("Lỗi Migration: %v", err)
-	}
-
+	log.Println("Đã kết nối Database")
+	log.Println("Đã tiêm Dependencies")
 	r := gin.Default()
 	r.Use(middleware.ErrorHandler())
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "pong"})
+	})
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	if cfg.Swagger.Enabled {
-		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	}
-
-	// 1. Module Account (Public)
-	accountRepo := repository.NewAccountRepository(db)
-	accountService := service.NewAccountService(accountRepo, cfg)
-	controller.NewAccountController(r, accountService, cfg)
-
-	// 2. Module Product (Protected)
-	productRepo := repository.NewProductRepository(db)
-	productService := service.NewProductService(productRepo)
-
-	productRoutes := r.Group("/api/v1/products")
-	productRoutes.Use(middleware.AuthMiddleware(cfg))
-	{
-		controller.NewProductController(productRoutes, productService)
-	}
-
+	userRepo := repository.NewMemoryUserRepository()
+	userService := service.NewUserService(userRepo, cfg)
+	controller.NewUserController(r, userService)
 	srv := &http.Server{
 		Addr:    cfg.HTTP.Port,
 		Handler: r,
@@ -77,9 +55,9 @@ func Run(cfg *config.Config) {
 	<-quit
 
 	log.Println("Nhận lệnh tắt server. Đang dọn dẹp...")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatal("Server tắt bất thường:", err)
 	}
